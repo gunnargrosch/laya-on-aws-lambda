@@ -27,8 +27,8 @@ The model is baked into the container image. There is no runtime download, no S3
 
 - [AWS SAM CLI](https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/install-sam-cli.html) 1.153.1 or later
 - Docker (running)
-- Node.js 24 and Python 3.13 (for the container builds)
-- Python 3.12 with `torch` for the one-time model export (`torch` has no 3.14 wheels yet)
+- Node.js, to build `laya-ts` from source during the export
+- Python 3.10-3.13 with `torch` for the one-time model export (`torch` has no 3.14 wheels yet)
 - AWS credentials configured (`AWS_PROFILE` or default)
 
 ## Getting started
