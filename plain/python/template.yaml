@@ -1,0 +1,69 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: A Jev-compatible Laya decision API on a regular Lambda function (Python)
+
+Parameters:
+  LambdaArchitecture:
+    Type: String
+    Default: x86_64
+    AllowedValues:
+      - x86_64
+      - arm64
+    Description: Set by deploy.sh to match your machine (container images are not cross-built).
+  ProvisionedConcurrency:
+    Type: Number
+    Default: 0
+    MinValue: 0
+    Description: Provisioned concurrency for the live alias. 0 (default) disables it; set >0 to keep environments warm at extra cost.
+
+Conditions:
+  UseProvisionedConcurrency: !Not [!Equals [!Ref ProvisionedConcurrency, 0]]
+
+Resources:
+  LayaDecisionFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: laya-decision-api-py
+      PackageType: Image
+      Architectures:
+        - !Ref LambdaArchitecture
+      Timeout: 600
+      MemorySize: 4096
+      AutoPublishAlias: live
+      ProvisionedConcurrencyConfig: !If
+        - UseProvisionedConcurrency
+        - ProvisionedConcurrentExecutions: !Ref ProvisionedConcurrency
+        - !Ref AWS::NoValue
+    Metadata:
+      DockerTag: python313-v1
+      DockerContext: .
+      Dockerfile: Dockerfile
+
+  # The Function URL is attached to the live alias so provisioned concurrency applies.
+  LayaDecisionFunctionUrl:
+    Type: AWS::Lambda::Url
+    Properties:
+      TargetFunctionArn: !Ref LayaDecisionFunctionAliaslive
+      AuthType: NONE
+
+  # Auth type NONE requires both statements (Lambda added lambda:InvokeFunction
+  # to function URL access in October 2025).
+  LayaDecisionFunctionUrlPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunctionUrl
+      FunctionName: !Ref LayaDecisionFunctionAliaslive
+      Principal: "*"
+      FunctionUrlAuthType: NONE
+
+  LayaDecisionFunctionUrlInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref LayaDecisionFunctionAliaslive
+      Principal: "*"
+      InvokedViaFunctionUrl: true
+
+Outputs:
+  FunctionUrl:
+    Value: !GetAtt LayaDecisionFunctionUrl.FunctionUrl

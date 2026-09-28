@@ -1,0 +1,4 @@
+node_modules
+laya-ts/node_modules
+.aws-sam
+*.tsbuildinfo
