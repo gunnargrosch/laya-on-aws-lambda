@@ -1,10 +1,26 @@
 # ONNX Runtime INT8 quantized models compute incorrect (uniform) results on AWS Lambda x86_64
 
-Status: reproducible, unresolved
+Status: resolved (cause found 2026-09-28, see Resolution)
 Reported by: Gunnar Grosch
 Date: 2026-09-28
 
-## Summary
+## Resolution (2026-09-28)
+
+**Not a Lambda or ONNX Runtime bug.** Lambda x86_64 environments (eu-north-1, 6 fresh environments) report `Intel(R) Xeon(R) Processor @ 2.50GHz` with **AVX2 only**: no AVX-512, no AVX512-VNNI, no AVX-VNNI, no AMX. `quantize_dynamic` defaults to U8S8 (uint8 activations, int8 weights), which the [ONNX Runtime quantization docs](https://onnxruntime.ai/docs/performance/model-optimizations/quantization.html) say can saturate on x86 CPUs without VNNI. The development CPU has AVX-VNNI, so it doesn't saturate. The AVX-512 hypothesis below was wrong.
+
+Max abs diff vs fp32 on Lambda, same models as the repro:
+
+| Variant | matmul_add (128x256) | matmul_big (768x768) |
+| --- | --- | --- |
+| int8, per-channel (as reported) | 0.239 | 0.708 |
+| int8, per-tensor | 0.236 | 0.707 |
+| int8, `reduce_range=True` | 0.009 | 0.030 |
+| uint8 weights (`QuantType.QUInt8`) | 0.006 | 0.018 |
+| development CPU, int8 | 0.005 | 0.017 |
+
+Both documented fixes work on the single-MatMul models. On the full Laya model they still drift too much to ship: `reduce_range=True` moves one `noul` answer from 0.973 to 0.468, and uint8 weights move probabilities by 0.07-0.14. The sample keeps fp32.
+
+## Summary (original report)
 
 An ONNX model quantized to INT8 with `onnxruntime.quantization.quantize_dynamic` predicts correctly when run on a workstation (and inside the same container image under Docker on that workstation), but returns **uniform / zero logits** when the identical container image runs on AWS Lambda x86_64. The same model run unquantized (fp32), or converted to fp16, predicts correctly on Lambda. The failure is therefore specific to the **INT8 execution path**, and it only appears on Lambda's CPU, not on the development CPU.
 
@@ -14,8 +30,8 @@ The most likely cause is an ONNX Runtime MLAS INT8 kernel issue on the AVX-512 (
 
 | | Development (correct) | AWS Lambda (incorrect) |
 | --- | --- | --- |
-| CPU | Intel Core Ultra 7 258V (Lunar Lake) | Intel Xeon with AVX-512 VNNI (Lambda x86_64) |
-| SIMD | AVX2, AVX-VNNI (no AVX-512) | AVX-512 VNNI (and AMX on newer instances) |
+| CPU | Intel Core Ultra 7 258V (Lunar Lake) | Intel Xeon @ 2.50GHz (Lambda x86_64) |
+| SIMD | AVX2, AVX-VNNI (no AVX-512) | AVX2 only, no VNNI (confirmed from `/proc/cpuinfo`) |
 | Runtime | Docker container, Lambda RIE (`docker run ... -p 9000:8080`) | AWS Lambda, x86_64, eu-north-1 |
 | Node.js | v24.21.0 (same image) | v24.21.0 |
 | onnxruntime-node | 1.30.0 | 1.30.0 |
@@ -103,7 +119,7 @@ We reduced this to a single quantized `MatMul` with no Laya code involved. `gen.
 | `matmul_add_softmax` | 0.000039 | 0.001724 |
 | `matmul_big` (768x768) | 0.016641 | **0.708** |
 
-A single INT8 `MatMul + Add` is off by ~48x between the two environments (0.004964 locally vs 0.239405 on Lambda), and `matmul_big` by ~43x. The standalone, deployable repro is published at **https://github.com/gunnargrosch/onnxruntime-int8-lambda-repro**. This is the artifact to hand to the ONNX Runtime / Lambda teams.
+A single INT8 `MatMul + Add` is off by ~48x between the two environments (0.004964 locally vs 0.239405 on Lambda), and `matmul_big` by ~43x. The standalone, deployable repro is published at **https://github.com/gunnargrosch/onnxruntime-int8-on-lambda**. This is the artifact to hand to the ONNX Runtime / Lambda teams.
 
 ## Related known issues in ONNX Runtime
 
@@ -119,7 +135,7 @@ None of these is an exact match for what we see (ours is 8-bit dynamic `QInt8` M
 
 Links: [#29853](https://github.com/microsoft/onnxruntime/issues/29853) / [PR #29886](https://github.com/microsoft/onnxruntime/pull/29886), [#29849](https://github.com/microsoft/onnxruntime/issues/29849), [#29862](https://github.com/microsoft/onnxruntime/issues/29862), [#26992](https://github.com/microsoft/onnxruntime/issues/26992), [#7524](https://github.com/microsoft/onnxruntime/issues/7524).
 
-## Analysis / hypothesis
+## Analysis / hypothesis (superseded by Resolution)
 
 - The failure only occurs on the AVX-512-capable Lambda CPU; it does not occur on the AVX-VNNI development CPU, and it does not occur for fp32 or fp16 on either. This points at the INT8 (QInt8) MatMul kernels in ONNX Runtime MLAS, specifically the AVX-512 VNNI / AMX implementation.
 - Equal, uniform logits are consistent with the quantized MatMul producing zeros (or a constant) rather than the correct integer accumulation, i.e. the quantized weights/scales are not being applied correctly on that kernel path.
@@ -159,5 +175,5 @@ This reproduces **locally** on onnxruntime 1.22 and 1.30, so it is an upstream L
 ## Artifacts
 
 - Sample repo and full context: `github.com/gunnargrosch/laya-on-aws-lambda` (TypeScript and Python variants; the TypeScript path is where this was found).
-- Minimal standalone repro: **https://github.com/gunnargrosch/onnxruntime-int8-lambda-repro** (`sam build && sam deploy`), plus `gen.py` to regenerate the models.
+- Minimal standalone repro: **https://github.com/gunnargrosch/onnxruntime-int8-on-lambda** (`sam build && sam deploy`), plus `gen.py` to regenerate the models.
 - Model: `convaiinnovations/laya` (Apache-2.0); quantized splits are build artifacts of `scripts/export.sh`.

@@ -6,8 +6,8 @@ set -euo pipefail
 
 CHECKPOINT="convaiinnovations/laya"
 REVISION="55cf4c4ebb4ebe31b2550e8bdf3bd21b99753851"   # pinned commit SHA on the HF hub
-LAYA_REF="main"                                       # laya repo ref for the export scripts
-PYTHON="${PYTHON:-python3}"                           # override if torch has no wheel for the default python
+LAYA_REF="9d955671415fc19f069b9cc998928075c1f255ec"   # pinned laya repo commit for the export scripts and laya-ts
+PYTHON="${PYTHON:-}"                                  # optional; otherwise the newest python3.10-3.13 on PATH
 
 REPO_DIR=".laya-repo"
 CKPT_DIR=".checkpoint"
@@ -15,6 +15,34 @@ OUT_TS="plain/typescript/model"
 OUT_PY="plain/python/model"
 
 cd "$(dirname "$0")/.."
+
+# laya needs Python 3.10+, and torch may lag on the newest release. On an older interpreter
+# pip silently resolves an old laya whose export API doesn't match, so pick a supported one.
+supported_python() {
+  "$1" -c 'import sys; sys.exit(0 if (3, 10) <= sys.version_info[:2] <= (3, 13) else 1)' 2>/dev/null
+}
+
+if [ -z "$PYTHON" ]; then
+  for candidate in python3.13 python3.12 python3.11 python3.10 python3; do
+    if command -v "$candidate" >/dev/null 2>&1 && supported_python "$candidate"; then
+      PYTHON="$candidate"
+      break
+    fi
+  done
+fi
+
+if [ -z "$PYTHON" ] || ! supported_python "$PYTHON"; then
+  echo "export.sh needs Python 3.10-3.13, and none was found${PYTHON:+ (PYTHON=$PYTHON is $("$PYTHON" -V 2>&1))}." >&2
+  echo "Install one (e.g. brew install python@3.12) or set PYTHON to its path." >&2
+  exit 1
+fi
+echo "==> Using $PYTHON ($("$PYTHON" -V 2>&1))"
+
+# A virtualenv left over from an unsupported interpreter would keep the wrong laya installed.
+if [ -x .venv/bin/python ] && ! supported_python .venv/bin/python; then
+  echo "==> Removing .venv built with $(.venv/bin/python -V 2>&1)"
+  rm -rf .venv
+fi
 
 echo "==> Creating virtualenv and installing export tooling"
 if command -v uv >/dev/null 2>&1; then
@@ -34,8 +62,9 @@ fi
 
 echo "==> Cloning the laya repo for its export scripts"
 rm -rf "$REPO_DIR"
-git clone --depth 1 https://github.com/NandhaKishorM/laya.git "$REPO_DIR"
-git -C "$REPO_DIR" checkout "$LAYA_REF" 2>/dev/null || true
+git init --quiet "$REPO_DIR"
+git -C "$REPO_DIR" fetch --quiet --depth 1 https://github.com/NandhaKishorM/laya.git "$LAYA_REF"
+git -C "$REPO_DIR" checkout --quiet FETCH_HEAD
 
 # laya-ts is not published to npm, so build it from source and vendor package.json + dist
 # into each TypeScript variant (referenced as "laya-ts": "file:./laya-ts").
@@ -70,10 +99,11 @@ echo "==> TypeScript: split ONNX via laya-ts export"
 mkdir -p "$OUT_TS"
 python "$REPO_DIR/laya-ts/scripts/export_onnx.py" --model-dir "$CKPT_DIR" --out-dir "$OUT_TS"
 
-# Note: INT8 quantization of the split models is intentionally NOT done. It loads and predicts
-# correctly on a workstation, but on Lambda's x86 CPUs the ONNX Runtime INT8 kernels returned
-# uniform (zero) logits, so the sample ships fp32. The model is loaded lazily at first invoke
-# (see the handlers) so the large read happens in the invoke phase, not the 10s-capped init phase.
+# Note: INT8 quantization of the split models is intentionally NOT done. Lambda's x86 CPUs expose
+# AVX2 without VNNI, where ONNX Runtime's default U8S8 dynamic quantization saturates and returns
+# uniform logits. reduce_range=True or uint8 weights avoid that, but the full model still drifts
+# too much (see docs/onnxruntime-int8-on-lambda.md), so the sample ships fp32. The model is loaded
+# lazily at first invoke so the large read happens in the invoke phase, not the 10s-capped init.
 
 echo "==> Python: checkpoint for the PyTorch path"
 # The laya ONNX export (scripts/export_onnx.py) errors at runtime for multi-question batches

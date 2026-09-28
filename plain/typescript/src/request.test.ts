@@ -17,3 +17,14 @@ test("parseRequest rejects invalid JSON", () => {
 test("parseRequest requires state and questions", () => {
   assert.throws(() => parseRequest('{"state": {}}'), BadRequest);
 });
+
+test("parseRequest rejects questions that are not an object", () => {
+  assert.throws(() => parseRequest('{"state": {}, "questions": ["q"]}'), BadRequest);
+});
+
+test("parseRequest rejects a question without a string type", () => {
+  assert.throws(
+    () => parseRequest('{"state": {}, "questions": {"q": {"instructions": "?"}}}'),
+    /question "q" must be an object with a string type/,
+  );
+});

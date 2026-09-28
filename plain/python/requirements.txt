@@ -1,1 +1,5 @@
-laya>=0.3.21
+# CPU-only torch. Without the extra index, pip on x86_64 Linux installs the CUDA build
+# and several GB of NVIDIA libraries that Lambda can never use.
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.14.0
+laya==0.3.21

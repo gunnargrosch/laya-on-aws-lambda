@@ -28,7 +28,7 @@ The model is baked into the container image. There is no runtime download, no S3
 - [AWS SAM CLI](https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/install-sam-cli.html) 1.153.1 or later
 - Docker (running)
 - Node.js, to build `laya-ts` from source during the export
-- Python 3.10-3.13 with `torch` for the one-time model export (`torch` has no 3.14 wheels yet)
+- Python 3.10-3.13 for the one-time model export. `export.sh` picks the newest one on your `PATH`; set `PYTHON` to override
 - AWS credentials configured (`AWS_PROFILE` or default)
 
 ## Getting started
@@ -38,7 +38,7 @@ git clone https://github.com/gunnargrosch/laya-on-aws-lambda.git
 cd laya-on-aws-lambda
 
 # one-time: build the model artifacts (see "Design decisions" for why this is separate)
-PYTHON=python3.12 ./scripts/export.sh
+./scripts/export.sh
 
 # deploy a variant
 cd plain/typescript && ./deploy.sh
@@ -118,7 +118,7 @@ plain/
 
 **Lazy model load.** Lambda caps the init phase at 10 seconds. Loading the model at module scope blows that cap, so the handler loads it on the first invoke and caches it. The load then runs under the function timeout instead of the init timeout.
 
-**fp32, not INT8.** Quantizing the TypeScript model to INT8 produced correct results on a workstation but wrong (uniform) results on Lambda's x86 CPUs, which points at an ONNX Runtime kernel path. The sample ships fp32. See [onnxruntime-int8-on-lambda](docs/onnxruntime-int8-on-lambda.md) and the standalone repro at [onnxruntime-int8-lambda-repro](https://github.com/gunnargrosch/onnxruntime-int8-lambda-repro).
+**fp32, not INT8.** Quantizing the TypeScript model to INT8 produced correct results on a workstation but wrong (uniform) results on Lambda x86. Lambda's x86 CPUs expose AVX2 without VNNI, where ONNX Runtime's default U8S8 quantization saturates. `reduce_range=True` or uint8 weights fix that, but the full model still drifts too much (up to 0.5 on one answer), so the sample ships fp32. See [onnxruntime-int8-on-lambda](docs/onnxruntime-int8-on-lambda.md) and the standalone repro at [onnxruntime-int8-on-lambda](https://github.com/gunnargrosch/onnxruntime-int8-on-lambda).
 
 **PyTorch for the Python variant.** The `laya` package's ONNX export fails for multi-question batches at runtime, so the Python variant uses the reference PyTorch path (`laya.load`) and bakes the checkpoint instead.
 

@@ -1,9 +1,13 @@
 import base64
 import json
+import logging
+import os
 
 import laya
 
 from request import parse_request
+
+logger = logging.getLogger(__name__)
 
 # Load lazily on first invoke (not in the init phase), then cache.
 _agent = None
@@ -14,6 +18,14 @@ def get_agent():
     if _agent is None:
         _agent = laya.load("/opt/model", device="cpu")
     return _agent
+
+
+# Provisioned concurrency environments aren't held to the 10s init cap (they get up to 130s
+# or the function timeout), so load the model during init there. Otherwise the first request
+# on every provisioned environment would still pay the model load.
+# The first predict() also pays one-time runtime setup, so run a throwaway prediction too.
+if os.environ.get("AWS_LAMBDA_INITIALIZATION_TYPE") == "provisioned-concurrency":
+    get_agent().predict("warm-up", {"warm_up": {"type": "noul", "instructions": "Is this a warm-up?"}})
 
 
 def _response(status_code, payload):
@@ -36,7 +48,9 @@ def handler(event, context):
 
     try:
         result = get_agent().predict(request["state"], request["questions"])
-    except Exception as exc:  # noqa: BLE001
-        return _response(500, {"error": str(exc)})
+    except Exception:  # noqa: BLE001
+        # Log the details for CloudWatch; don't echo internals on a public URL.
+        logger.exception("predict failed")
+        return _response(500, {"error": "internal_error"})
 
     return _response(200, result)
