@@ -85,7 +85,7 @@ curl -s "$FUNCTION_URL" -H 'content-type: application/json' -d '{
 { "answers": { "department": { "choice": "billing", "answer_confidence": 0.9863 } }, "usage": { "input_tokens": 157, "output_tokens": 0 } }
 ```
 
-The template sets `FunctionUrlConfig: AuthType: NONE` so the quickstart works with plain `curl`. Put AWS_IAM auth, an API key, or a WAF in front before exposing it.
+The Function URL uses `AuthType: NONE` so the quickstart works with plain `curl`. Put AWS_IAM auth, an API key, or a WAF in front before exposing it.
 
 ## Test
 
@@ -118,7 +118,7 @@ plain/
 
 **Lazy model load.** Lambda caps the init phase at 10 seconds. Loading the model at module scope blows that cap, so the handler loads it on the first invoke and caches it. The load then runs under the function timeout instead of the init timeout.
 
-**fp32, not INT8.** Quantizing the TypeScript model to INT8 produced correct results on a workstation but wrong (uniform) results on Lambda's x86 CPUs, an ONNX Runtime kernel issue. The sample ships fp32. See [onnxruntime-int8-on-lambda](docs/onnxruntime-int8-on-lambda.md) and the standalone repro at [onnxruntime-int8-lambda-repro](https://github.com/gunnargrosch/onnxruntime-int8-lambda-repro).
+**fp32, not INT8.** Quantizing the TypeScript model to INT8 produced correct results on a workstation but wrong (uniform) results on Lambda's x86 CPUs, which points at an ONNX Runtime kernel path. The sample ships fp32. See [onnxruntime-int8-on-lambda](docs/onnxruntime-int8-on-lambda.md) and the standalone repro at [onnxruntime-int8-lambda-repro](https://github.com/gunnargrosch/onnxruntime-int8-lambda-repro).
 
 **PyTorch for the Python variant.** The `laya` package's ONNX export fails for multi-question batches at runtime, so the Python variant uses the reference PyTorch path (`laya.load`) and bakes the checkpoint instead.
 
