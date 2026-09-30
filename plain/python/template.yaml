@@ -8,8 +8,7 @@ Parameters:
     Default: x86_64
     AllowedValues:
       - x86_64
-      - arm64
-    Description: Set by deploy.sh to match your machine (container images are not cross-built).
+    Description: x86_64 only. PyTorch fails to initialize cpuinfo on Lambda arm64 (pytorch/pytorch#113568).
   ProvisionedConcurrency:
     Type: Number
     Default: 0
